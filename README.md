@@ -15,7 +15,9 @@ eject and the "Now Playing" message all work.
    R R R
    ```
 3. Open the Disc Burner and put a blank disc in the left slot.
-4. **Drag an audio file onto the game window**, or press **Browse...** to pick one.
+4. **Drag an audio file onto the game window**, or press **Browse...** to pick one. Browse opens your computer's
+   file dialog. If that can't open, it switches to a file browser inside the game. You can also choose the
+   in-game browser in the settings.
    MP3, FLAC, M4A/AAC, WAV, OGG and OPUS all work (anything ffmpeg can read).
 5. Type a **song title** and an **artist**. If the file has tags, these are filled in for you.
 6. Optional: click **Clean** to switch it to **Explicit** (see below).
@@ -38,7 +40,8 @@ hears the same order.
 ### Explicit discs
 
 Click **Clean** to switch it to **Explicit** when burning. Explicit discs show a red "Explicit" line in their
-tooltip. Any player can type **`/customdiscs`** and turn on **Mute explicit discs**. They won't hear those
+tooltip. Any player can turn on **Explicit Discs: Muted** with the button at the bottom of the **pause menu**,
+or in the settings (the **Discs...** button in the pause menu, or **`/customdiscs`**). They won't hear those
 discs, and they'll see "Explicit disc muted" instead. It's a per-player setting. Other players still hear the
 disc, and it only works if whoever burned the disc marked it.
 
@@ -100,7 +103,8 @@ lengths and hashes, so discs are tiny and can be copied, stored in chests or mov
 | `transferWindowChunks` | 4 | How many 30 KB chunks may be in flight per download. Lower it for very slow relays. |
 | `deleteUnusedTracksAfterDays` | 0 | Delete stored songs nobody has burned, played or downloaded for this many days. 0 = never. Songs on discs sitting in chests count as unused, so only turn this on if that is okay. |
 
-`config/custom_discs-client.json` (or type `/customdiscs` in game for the settings screen):
+`config/custom_discs-client.json` (or open the settings in game: the **Discs...** button in the pause menu, or
+`/customdiscs`):
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -108,7 +112,8 @@ lengths and hashes, so discs are tiny and can be copied, stored in chests or mov
 | `ffmpegPath` | `""` | Full path to ffmpeg, if it isn't found automatically. |
 | `bitrateKbps` | 96 | Bitrate for songs you burn (32-320, capped by the server). |
 | `prefillFromTags` | true | Fill in Title and Artist from the file's tags. |
-| `muteExplicitDiscs` | false | Don't play discs marked explicit. |
+| `muteExplicitDiscs` | false | Don't play discs marked explicit. Also toggled from the pause menu. |
+| `useSystemFileDialog` | true | Browse opens the system file dialog. Set it to false to always use the in-game browser. |
 
 ## Building
 
