@@ -21,6 +21,7 @@ import net.minecraft.world.entity.player.Inventory;
 import dev.customdiscs.ModRegistry;
 import dev.customdiscs.DiscInfo;
 import dev.customdiscs.client.BurnController;
+import dev.customdiscs.client.ClientConfig;
 import dev.customdiscs.client.ServerLimits;
 import dev.customdiscs.client.audio.FfmpegDownloader;
 import dev.customdiscs.client.audio.NativeFilePicker;
@@ -47,6 +48,8 @@ public class DiscBurnerScreen extends AbstractContainerScreen<DiscBurnerMenu> {
 	private static boolean explicitDraft;
 	private static boolean shuffleDraft;
 	private static @Nullable Path lastDirectory;
+	/** True while the system file dialog is open, so Browse can't open a second one. */
+	private static volatile boolean pickerOpen;
 
 	private EditBox titleBox;
 	private EditBox artistBox;
@@ -145,7 +148,7 @@ public class DiscBurnerScreen extends AbstractContainerScreen<DiscBurnerMenu> {
 
 		boolean busy = BurnController.isBusy();
 		burnButton.active = BurnController.canBurn() && slotsReady() && !titleBox.getValue().isBlank();
-		browseButton.active = !busy;
+		browseButton.active = !busy && !pickerOpen;
 		ffmpegButton.visible = BurnController.ffmpegMissing() && FfmpegDownloader.isSupported();
 		ffmpegButton.active = !busy;
 		titleBox.setEditable(!busy);
@@ -165,18 +168,39 @@ public class DiscBurnerScreen extends AbstractContainerScreen<DiscBurnerMenu> {
 	}
 
 	private void browse() {
+		if (!ClientConfig.get().useSystemFileDialog) {
+			openInGameBrowser();
+			return;
+		}
+
 		String title = Component.translatable("gui.custom_discs.choose_file").getString();
+		pickerOpen = true;
 		Thread thread = new Thread(() -> {
 			List<Path> files = NativeFilePicker.pick(title, lastDirectory);
 
-			if (files == null) {
-				minecraft.execute(() -> BurnController.showMessage(Component.translatable("message.custom_discs.error.no_file_dialog")));
-			} else if (!files.isEmpty()) {
-				minecraft.execute(() -> onFilesChosen(files));
-			}
+			minecraft.execute(() -> {
+				pickerOpen = false;
+
+				if (files == null) {
+					// No system dialog on this computer: use the in-game browser instead.
+					if (minecraft.gui.screen() == this) {
+						openInGameBrowser();
+					}
+				} else if (!files.isEmpty()) {
+					onFilesChosen(files);
+				}
+			});
 		}, "Custom Discs file picker");
 		thread.setDaemon(true);
 		thread.start();
+	}
+
+	private void openInGameBrowser() {
+		minecraft.gui.setScreen(new FileBrowserScreen(this, lastDirectory, files -> {
+			if (!files.isEmpty()) {
+				onFilesChosen(files);
+			}
+		}));
 	}
 
 	private static void onFilesChosen(List<Path> paths) {

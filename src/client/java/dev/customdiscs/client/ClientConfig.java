@@ -28,6 +28,8 @@ public final class ClientConfig {
 	public boolean prefillFromTags = true;
 	/** Don't play discs that their creator marked as explicit. */
 	public boolean muteExplicitDiscs = false;
+	/** Browse opens the operating system's file dialog; false uses the in-game file browser. */
+	public boolean useSystemFileDialog = true;
 
 	public static ClientConfig get() {
 		return instance;

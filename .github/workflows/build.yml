@@ -23,6 +23,7 @@ jobs:
           .github/scripts/dump-api.sh
           net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
           net.minecraft.client.gui.screens.Screen
+          net.minecraft.client.gui.screens.PauseScreen
           net.minecraft.client.input.KeyEvent
           com.mojang.blaze3d.platform.InputConstants
           net.minecraft.client.gui.Hud

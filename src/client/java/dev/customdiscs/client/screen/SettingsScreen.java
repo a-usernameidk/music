@@ -52,8 +52,14 @@ public class SettingsScreen extends Screen {
 			ClientConfig.save();
 		}).pos(x, y + 48).size(200, 20).build());
 
+		addRenderableWidget(Button.builder(Component.translatable(config.useSystemFileDialog ? "gui.custom_discs.settings.picker_system" : "gui.custom_discs.settings.picker_game"), button -> {
+			config.useSystemFileDialog = !config.useSystemFileDialog;
+			button.setMessage(Component.translatable(config.useSystemFileDialog ? "gui.custom_discs.settings.picker_system" : "gui.custom_discs.settings.picker_game"));
+			ClientConfig.save();
+		}).pos(x, y + 72).size(200, 20).build());
+
 		addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, button -> onClose())
-				.pos(x, y + 84)
+				.pos(x, y + 108)
 				.size(200, 20)
 				.build());
 	}

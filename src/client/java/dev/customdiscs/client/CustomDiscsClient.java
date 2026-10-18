@@ -24,6 +24,7 @@ public class CustomDiscsClient implements ClientModInitializer {
 	public void onInitializeClient() {
 		ClientConfig.load();
 		MenuScreens.register(ModRegistry.DISC_BURNER_MENU, DiscBurnerScreen::new);
+		PauseMenuButtons.register();
 
 		ClientPlayNetworking.registerGlobalReceiver(ModPayloads.ServerSettings.TYPE, (payload, context) -> ServerLimits.set(payload));
 		ClientPlayNetworking.registerGlobalReceiver(ModPayloads.UploadStatus.TYPE, (payload, context) -> BurnController.handleStatus(payload));
