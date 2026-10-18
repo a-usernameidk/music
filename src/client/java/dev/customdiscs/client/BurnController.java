@@ -48,7 +48,7 @@ public final class BurnController {
 	private static Component message = Component.empty();
 
 	private static @Nullable Path selectedFile;
-	private static @Nullable Ffmpeg.ProbeResult probe;
+	private static Ffmpeg.@Nullable ProbeResult probe;
 	private static String suggestedTitle = "";
 	private static String suggestedArtist = "";
 	private static boolean ffmpegMissing;
@@ -100,7 +100,7 @@ public final class BurnController {
 		return selectedFile;
 	}
 
-	public static @Nullable Ffmpeg.ProbeResult probe() {
+	public static Ffmpeg.@Nullable ProbeResult probe() {
 		return probe;
 	}
 
@@ -140,6 +140,13 @@ public final class BurnController {
 		String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
 		int dot = name.lastIndexOf('.');
 		return dot >= 0 && Ffmpeg.EXTENSIONS.contains(name.substring(dot + 1));
+	}
+
+	/** Shows a message in the status line without changing what is selected. */
+	public static void showMessage(Component text) {
+		if (!isBusy()) {
+			set(phase == Phase.ERROR ? Phase.IDLE : phase, progress, text);
+		}
 	}
 
 	/** A file was dropped on the screen or picked with Browse. */

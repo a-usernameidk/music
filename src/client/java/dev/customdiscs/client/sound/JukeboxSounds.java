@@ -51,7 +51,7 @@ public final class JukeboxSounds {
 		ACTIVE.put(pos, active);
 
 		// Vanilla shows its own "Now Playing" from the shared song entry; replace it with the real title.
-		minecraft.gui.setOverlayMessage(Component.translatable("record.nowPlaying", payload.track().displayName()), true);
+		minecraft.gui.hud.setOverlayMessage(Component.translatable("record.nowPlaying", payload.track().displayName()), true);
 
 		TrackCache.request(payload.track().hash(), file -> {
 			if (ACTIVE.get(pos) != active) {

@@ -3,13 +3,10 @@ package dev.customdiscs.client.screen;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Locale;
 
 import org.jspecify.annotations.Nullable;
-import org.lwjgl.PointerBuffer;
-import org.lwjgl.glfw.GLFW;
-import org.lwjgl.system.MemoryStack;
-import org.lwjgl.util.tinyfd.TinyFileDialogs;
+
+import com.mojang.blaze3d.platform.InputConstants;
 
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -25,6 +22,7 @@ import dev.customdiscs.client.BurnController;
 import dev.customdiscs.client.ServerLimits;
 import dev.customdiscs.client.audio.Ffmpeg;
 import dev.customdiscs.client.audio.FfmpegDownloader;
+import dev.customdiscs.client.audio.NativeFilePicker;
 import dev.customdiscs.menu.DiscBurnerMenu;
 
 public class DiscBurnerScreen extends AbstractContainerScreen<DiscBurnerMenu> {
@@ -140,39 +138,18 @@ public class DiscBurnerScreen extends AbstractContainerScreen<DiscBurnerMenu> {
 	}
 
 	private void browse() {
-		Path start = lastDirectory != null ? lastDirectory : Path.of(System.getProperty("user.home"));
-		String startPath = start.toAbsolutePath() + start.getFileSystem().getSeparator();
+		String title = Component.translatable("gui.custom_discs.choose_file").getString();
+		Thread thread = new Thread(() -> {
+			List<Path> files = NativeFilePicker.pick(title, lastDirectory);
 
-		Runnable open = () -> {
-			String result;
-
-			try (MemoryStack stack = MemoryStack.stackPush()) {
-				PointerBuffer filters = stack.mallocPointer(Ffmpeg.EXTENSIONS.size() * 2);
-
-				for (String extension : Ffmpeg.EXTENSIONS) {
-					filters.put(stack.UTF8("*." + extension));
-					filters.put(stack.UTF8("*." + extension.toUpperCase(Locale.ROOT)));
-				}
-
-				filters.flip();
-				result = TinyFileDialogs.tinyfd_openFileDialog(
-						Component.translatable("gui.custom_discs.choose_file").getString(), startPath, filters,
-						Component.translatable("gui.custom_discs.audio_files").getString(), false);
+			if (files == null) {
+				minecraft.execute(() -> BurnController.showMessage(Component.translatable("message.custom_discs.error.no_file_dialog")));
+			} else if (!files.isEmpty()) {
+				minecraft.execute(() -> onFileChosen(files.getFirst()));
 			}
-
-			if (result != null) {
-				minecraft.execute(() -> onFileChosen(Path.of(result)));
-			}
-		};
-
-		if (Ffmpeg.isMac()) {
-			// macOS only allows dialogs on the main thread. The game waits until the dialog closes.
-			open.run();
-		} else {
-			Thread thread = new Thread(open, "Custom Discs file picker");
-			thread.setDaemon(true);
-			thread.start();
-		}
+		}, "Custom Discs file picker");
+		thread.setDaemon(true);
+		thread.start();
 	}
 
 	private static void onFileChosen(Path path) {
@@ -200,7 +177,7 @@ public class DiscBurnerScreen extends AbstractContainerScreen<DiscBurnerMenu> {
 		// Typing "e" or a hotbar number into a text field must not close the screen or move items.
 		EditBox focused = titleBox.isFocused() ? titleBox : artistBox.isFocused() ? artistBox : null;
 
-		if (focused != null && event.key() != GLFW.GLFW_KEY_ESCAPE) {
+		if (focused != null && event.key() != InputConstants.KEY_ESCAPE) {
 			return focused.keyPressed(event) || focused.canConsumeInput() || super.keyPressed(event);
 		}
 

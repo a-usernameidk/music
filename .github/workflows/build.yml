@@ -17,6 +17,31 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: chmod +x gradlew
       - run: ./gradlew build --stacktrace
+      - name: Dump Minecraft API signatures
+        if: always()
+        run: >
+          .github/scripts/dump-api.sh
+          net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
+          net.minecraft.client.gui.screens.Screen
+          net.minecraft.client.input.KeyEvent
+          com.mojang.blaze3d.platform.InputConstants
+          net.minecraft.client.gui.Hud
+          net.minecraft.client.gui.components.EditBox
+          net.minecraft.client.gui.components.Checkbox
+          net.minecraft.client.gui.components.CycleButton
+          net.minecraft.client.gui.Font
+          net.minecraft.client.sounds.JOrbisAudioStream
+          net.minecraft.client.resources.sounds.AbstractSoundInstance
+          net.minecraft.world.level.block.entity.JukeboxBlockEntity
+          net.minecraft.world.item.JukeboxSongPlayer
+          net.minecraft.world.item.component.TooltipDisplay
+          'net.minecraft.world.item.Item$Properties'
+          > api-dump.txt; cat api-dump.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: api-dump
+          path: api-dump.txt
       - uses: actions/upload-artifact@v4
         with:
           name: custom-discs-mod
