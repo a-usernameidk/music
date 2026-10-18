@@ -14,8 +14,10 @@ eject and the "Now Playing" message all work.
    I J I
    R R R
    ```
+   Both recipes appear in your recipe book once you pick up an amethyst shard or a jukebox. The Disc Burner
+   drops itself when mined with any pickaxe.
 3. Open the Disc Burner and put a blank disc in the left slot.
-4. **Drag an audio file onto the game window**, or press **Browse...** to pick one. Browse opens your computer's
+4. **Drag an audio file onto the game window**, or press **Choose song(s)...** to pick one. It opens your computer's
    file dialog. If that can't open, it switches to a file browser inside the game. You can also choose the
    in-game browser in the settings.
    MP3, FLAC, M4A/AAC, WAV, OGG and OPUS all work (anything ffmpeg can read).
@@ -24,11 +26,14 @@ eject and the "Now Playing" message all work.
 7. Press **Burn**. The song is compressed and uploaded, and the finished disc appears in the right slot.
 8. Put the disc in any jukebox.
 
+Everything works in survival. Any player can burn discs unless the server sets `opsOnly`. A disc you no longer
+want can be **erased** back into a blank disc by putting it in a crafting grid on its own.
+
 ### Albums
 
-Pick **several files** in Browse (or drag several onto the window) to burn a whole album onto one disc. Tracks
+Pick **several files** with **Choose song(s)...** (or drag several onto the window) to burn a whole album onto one disc. Tracks
 are ordered by their disc and track number tags, then by file name. Album title and artist come from the tags.
-Hover the "N files" line to see the track list. In a jukebox the tracks play one after another, and the tooltip
+Hover the song button to see the track list. In a jukebox the tracks play one after another, and the tooltip
 lists them.
 
 ### Shuffle

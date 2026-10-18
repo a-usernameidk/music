@@ -15,11 +15,11 @@ import dev.customdiscs.block.DiscBurnerBlockEntity;
 public class DiscBurnerMenu extends AbstractContainerMenu {
 	// Layout shared with the client screen.
 	public static final int IMAGE_WIDTH = 176;
-	public static final int IMAGE_HEIGHT = 228;
-	public static final int INPUT_X = 26;
-	public static final int OUTPUT_X = 134;
-	public static final int SLOT_Y = 112;
-	public static final int INVENTORY_Y = 146;
+	public static final int IMAGE_HEIGHT = 238;
+	public static final int INPUT_X = 30;
+	public static final int OUTPUT_X = 130;
+	public static final int SLOT_Y = 104;
+	public static final int INVENTORY_Y = 156;
 
 	private final Container container;
 	private final BlockPos pos;
