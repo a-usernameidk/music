@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/orientable",
+  "textures": {
+    "top": "custom_discs:block/disc_burner_top",
+    "front": "custom_discs:block/disc_burner_front",
+    "side": "custom_discs:block/disc_burner_side"
+  }
+}

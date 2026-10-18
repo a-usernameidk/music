@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "custom_discs:block/disc_burner" },
+    "facing=east": { "model": "custom_discs:block/disc_burner", "y": 90 },
+    "facing=south": { "model": "custom_discs:block/disc_burner", "y": 180 },
+    "facing=west": { "model": "custom_discs:block/disc_burner", "y": 270 }
+  }
+}

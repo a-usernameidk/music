@@ -1,0 +1,10 @@
+{
+  "music_disc.burned": {
+    "sounds": [
+      {
+        "name": "fabric-sound-api-v1:empty",
+        "stream": true
+      }
+    ]
+  }
+}

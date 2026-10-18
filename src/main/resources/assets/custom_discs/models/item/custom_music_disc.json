@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "custom_discs:item/custom_music_disc"
+  }
+}

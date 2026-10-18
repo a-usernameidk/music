@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " D ",
+    "DAD",
+    " D "
+  ],
+  "key": {
+    "D": "minecraft:black_dye",
+    "A": "minecraft:amethyst_shard"
+  },
+  "result": {
+    "id": "custom_discs:blank_music_disc",
+    "count": 1
+  }
+}

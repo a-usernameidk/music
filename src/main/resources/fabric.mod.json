@@ -1,0 +1,33 @@
+{
+	"schemaVersion": 1,
+	"id": "custom_discs",
+	"version": "${version}",
+	"name": "Custom Music Discs",
+	"description": "Burn your own songs onto music discs with the Disc Burner. Discs play in vanilla jukeboxes and everyone nearby hears them.",
+	"authors": [
+		"a-usernameidk"
+	],
+	"contact": {
+		"sources": "https://github.com/a-usernameidk/music"
+	},
+	"license": "Apache-2.0",
+	"icon": "assets/custom_discs/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"dev.customdiscs.CustomDiscs"
+		],
+		"client": [
+			"dev.customdiscs.client.CustomDiscsClient"
+		]
+	},
+	"mixins": [
+		"custom_discs.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": ">=26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

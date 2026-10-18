@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "III",
+    "IJI",
+    "RRR"
+  ],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "J": "minecraft:jukebox",
+    "R": "minecraft:redstone"
+  },
+  "result": {
+    "id": "custom_discs:disc_burner",
+    "count": 1
+  }
+}

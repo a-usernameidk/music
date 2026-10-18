@@ -1,0 +1,14 @@
+{
+	"required": true,
+	"package": "dev.customdiscs.mixin",
+	"compatibilityLevel": "JAVA_25",
+	"mixins": [
+		"JukeboxBlockEntityMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	},
+	"overwrites": {
+		"requireAnnotations": true
+	}
+}
