@@ -37,6 +37,7 @@ public final class CustomDiscSoundInstance extends AbstractSoundInstance {
 	private final Path file;
 	private final long startGameTime;
 
+	/** @param startGameTime game time at which this track (not the whole disc) started */
 	public CustomDiscSoundInstance(BlockPos pos, Path file, long startGameTime) {
 		super(SOUND_ID, SoundSource.RECORDS, SoundInstance.createUnseededRandom());
 		this.file = file;

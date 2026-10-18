@@ -36,14 +36,14 @@ public final class ModRegistry {
 	/**
 	 * One shared jukebox song (data/custom_discs/jukebox_song/burned.json) used by every burned disc. Vanilla
 	 * code handles inserting, ejecting, hoppers and comparator output through it; the actual audio, title and
-	 * length come from the {@link TrackInfo} component on the disc.
+	 * length come from the {@link DiscInfo} component on the disc.
 	 */
 	public static final ResourceKey<JukeboxSong> BURNED_SONG = ResourceKey.create(Registries.JUKEBOX_SONG, CustomDiscs.id("burned"));
 
-	public static final DataComponentType<TrackInfo> TRACK = Registry.register(
+	public static final DataComponentType<DiscInfo> DISC = Registry.register(
 			BuiltInRegistries.DATA_COMPONENT_TYPE,
-			CustomDiscs.id("track"),
-			DataComponentType.<TrackInfo>builder().persistent(TrackInfo.CODEC).networkSynchronized(TrackInfo.STREAM_CODEC).build()
+			CustomDiscs.id("disc"),
+			DataComponentType.<DiscInfo>builder().persistent(DiscInfo.CODEC).networkSynchronized(DiscInfo.STREAM_CODEC).build()
 	);
 
 	public static final ResourceKey<Block> DISC_BURNER_KEY = ResourceKey.create(Registries.BLOCK, CustomDiscs.id("disc_burner"));
@@ -59,11 +59,11 @@ public final class ModRegistry {
 
 	public static final Item BLANK_MUSIC_DISC = item("blank_music_disc", Item::new, new Item.Properties().stacksTo(16));
 
-	public static final Item CUSTOM_MUSIC_DISC = item("custom_music_disc", Item::new, new Item.Properties()
+	public static final Item CUSTOM_MUSIC_DISC = item("custom_music_disc", CustomMusicDiscItem::new, new Item.Properties()
 			.stacksTo(1)
 			.rarity(Rarity.RARE)
 			.jukeboxPlayable(BURNED_SONG)
-			// Hide the vanilla "song description" line; TrackInfo adds "Artist - Title" instead.
+			// Hide the vanilla "song description" line; DiscInfo adds "Artist - Title" instead.
 			.component(DataComponents.TOOLTIP_DISPLAY, TooltipDisplay.DEFAULT.withHidden(DataComponents.JUKEBOX_PLAYABLE, true)));
 
 	public static final BlockEntityType<DiscBurnerBlockEntity> DISC_BURNER_BLOCK_ENTITY = Registry.register(
@@ -87,7 +87,7 @@ public final class ModRegistry {
 	}
 
 	public static void register() {
-		ItemComponentTooltipProviderRegistry.addFirst(TRACK, track -> (context, consumer, flag, components) -> track.appendTooltip(consumer, flag));
+		ItemComponentTooltipProviderRegistry.addFirst(DISC, disc -> (context, consumer, flag, components) -> disc.appendTooltip(consumer, flag));
 
 		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.FUNCTIONAL_BLOCKS).register(content -> content.insertAfter(Items.JUKEBOX, DISC_BURNER_ITEM));
 		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.TOOLS_AND_UTILITIES).register(content -> content.accept(BLANK_MUSIC_DISC));

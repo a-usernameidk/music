@@ -1,11 +1,14 @@
 package dev.customdiscs.server;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import org.jspecify.annotations.Nullable;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.PermissionLevel;
@@ -15,8 +18,8 @@ import net.minecraft.world.item.ItemStack;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 
 import dev.customdiscs.CustomDiscs;
+import dev.customdiscs.DiscInfo;
 import dev.customdiscs.ModRegistry;
-import dev.customdiscs.TrackInfo;
 import dev.customdiscs.block.DiscBurnerBlockEntity;
 import dev.customdiscs.config.ServerConfig;
 import dev.customdiscs.menu.DiscBurnerMenu;
@@ -25,19 +28,24 @@ import dev.customdiscs.net.ModPayloads.UploadStatus;
 import dev.customdiscs.util.Hashing;
 import dev.customdiscs.util.OggInfo;
 
-/** Receives chunked uploads from the Disc Burner screen, validates them and burns the disc. */
+/**
+ * Receives tracks from the Disc Burner screen one file at a time, validates and stores them, then burns the
+ * disc when the client sends {@link ModPayloads.BurnDisc} with the full track list.
+ */
 public final class UploadManager {
 	private static final long TIMEOUT_MS = 60_000;
 
 	private static final Map<UUID, Upload> UPLOADS = new HashMap<>();
 	private static final Map<UUID, Long> LAST_BURN = new HashMap<>();
+	/** Track lengths measured from stored files, so burning an album does not re-read every file. */
+	private static final Map<String, Integer> DURATIONS = new HashMap<>();
 
 	private UploadManager() {
 	}
 
 	private static final class Upload {
 		final int id;
-		final ModPayloads.UploadBegin request;
+		final String hash;
 		final byte[] data;
 		int received;
 		int nextSeq;
@@ -45,7 +53,7 @@ public final class UploadManager {
 
 		Upload(ModPayloads.UploadBegin request) {
 			this.id = request.uploadId();
-			this.request = request;
+			this.hash = request.hash();
 			this.data = new byte[request.size()];
 		}
 	}
@@ -58,12 +66,16 @@ public final class UploadManager {
 		return player.checkPermission(CustomDiscs.id("burn"), true);
 	}
 
-	private static void send(ServerPlayer player, int uploadId, int state, int received, Component message) {
+	private static void status(ServerPlayer player, int uploadId, int state, int received, Component message) {
 		ServerPlayNetworking.send(player, new UploadStatus(uploadId, state, received, message));
 	}
 
-	private static void error(ServerPlayer player, int uploadId, String key, Object... args) {
-		send(player, uploadId, UploadStatus.ERROR, 0, Component.translatable(key, args));
+	private static void uploadError(ServerPlayer player, int uploadId, String key, Object... args) {
+		status(player, uploadId, UploadStatus.ERROR, 0, Component.translatable(key, args));
+	}
+
+	private static void burnError(ServerPlayer player, String key, Object... args) {
+		ServerPlayNetworking.send(player, new ModPayloads.BurnResult(false, Component.translatable(key, args)));
 	}
 
 	/** Removes control characters and formatting codes, trims, and limits the length. */
@@ -73,12 +85,12 @@ public final class UploadManager {
 				.filter(c -> c >= 0x20 && c != 0x7F && c != 0xA7)
 				.forEach(out::appendCodePoint);
 		String cleaned = out.toString().strip();
-		return cleaned.length() > TrackInfo.MAX_TEXT_LENGTH ? cleaned.substring(0, TrackInfo.MAX_TEXT_LENGTH) : cleaned;
+		return cleaned.length() > DiscInfo.MAX_TEXT_LENGTH ? cleaned.substring(0, DiscInfo.MAX_TEXT_LENGTH) : cleaned;
 	}
 
-	/** The open Disc Burner menu for this upload, or null if the player closed it or walked away. */
-	private static @Nullable DiscBurnerMenu openBurner(ServerPlayer player, ModPayloads.UploadBegin request) {
-		if (player.containerMenu instanceof DiscBurnerMenu menu && menu.getPos().equals(request.pos()) && menu.stillValid(player)) {
+	/** The open Disc Burner menu at {@code pos}, or null if the player closed it or walked away. */
+	private static @Nullable DiscBurnerMenu openBurner(ServerPlayer player, BlockPos pos) {
+		if (player.containerMenu instanceof DiscBurnerMenu menu && menu.getPos().equals(pos) && menu.stillValid(player)) {
 			return menu;
 		}
 
@@ -99,63 +111,78 @@ public final class UploadManager {
 		return null;
 	}
 
+	/** Checks an Ogg file and returns its length in ticks, or an error translation key. */
+	private static Object measure(byte[] data) {
+		OggInfo info;
+
+		try {
+			info = OggInfo.parse(data);
+		} catch (OggInfo.InvalidOggException e) {
+			return "message.custom_discs.error.corrupt";
+		}
+
+		if (info.channels() != 1) {
+			// Minecraft only places mono sounds in the world; stereo would be heard at full volume everywhere.
+			return "message.custom_discs.error.not_mono";
+		}
+
+		if (info.durationSeconds() > ServerConfig.get().maxDurationSeconds + 1) {
+			return "message.custom_discs.error.too_long";
+		}
+
+		return info.durationTicks();
+	}
+
+	private static @Nullable Integer storedDuration(String hash) {
+		Integer cached = DURATIONS.get(hash);
+
+		if (cached != null) {
+			return cached;
+		}
+
+		byte[] data = TrackStore.read(hash);
+
+		if (data == null || !(measure(data) instanceof Integer ticks)) {
+			return null;
+		}
+
+		DURATIONS.put(hash, ticks);
+		return ticks;
+	}
+
 	public static void handleBegin(ServerPlayer player, ModPayloads.UploadBegin request) {
 		ServerConfig config = ServerConfig.get();
 		int id = request.uploadId();
 		UPLOADS.remove(player.getUUID());
 
 		if (!canBurn(player)) {
-			error(player, id, "message.custom_discs.error.no_permission");
+			uploadError(player, id, "message.custom_discs.error.no_permission");
 			return;
 		}
 
-		DiscBurnerMenu menu = openBurner(player, request);
-
-		if (menu == null) {
-			error(player, id, "message.custom_discs.error.burner_closed");
-			return;
-		}
-
-		String slotError = checkSlots(menu);
-
-		if (slotError != null) {
-			error(player, id, slotError);
-			return;
-		}
-
-		if (cleanText(request.title()).isEmpty()) {
-			error(player, id, "message.custom_discs.error.no_title");
+		if (openBurner(player, request.pos()) == null) {
+			uploadError(player, id, "message.custom_discs.error.burner_closed");
 			return;
 		}
 
 		if (!Hashing.isValidHash(request.hash())) {
-			error(player, id, "message.custom_discs.error.corrupt", "bad hash");
+			uploadError(player, id, "message.custom_discs.error.corrupt");
 			return;
 		}
 
 		if (request.size() <= 0 || request.size() > config.maxFileBytes()) {
-			error(player, id, "message.custom_discs.error.too_large", config.maxFileSizeMb);
+			uploadError(player, id, "message.custom_discs.error.too_large", config.maxFileSizeMb);
 			return;
 		}
 
-		Long last = LAST_BURN.get(player.getUUID());
-		long waitMs = last == null ? 0 : last + config.burnCooldownSeconds * 1000L - System.currentTimeMillis();
-
-		if (waitMs > 0) {
-			error(player, id, "message.custom_discs.error.cooldown", (waitMs + 999) / 1000);
-			return;
-		}
-
-		// Content addressed: if anyone already uploaded this exact file, burn straight away.
-		byte[] existing = TrackStore.read(request.hash());
-
-		if (existing != null) {
-			finish(player, request, existing);
+		// Content addressed: if anyone already uploaded this exact file, there is nothing to send.
+		if (TrackStore.has(request.hash()) && storedDuration(request.hash()) != null) {
+			status(player, id, UploadStatus.STORED, request.size(), Component.empty());
 			return;
 		}
 
 		UPLOADS.put(player.getUUID(), new Upload(request));
-		send(player, id, UploadStatus.READY, 0, Component.empty());
+		status(player, id, UploadStatus.READY, 0, Component.empty());
 	}
 
 	public static void handleChunk(ServerPlayer player, ModPayloads.UploadChunk chunk) {
@@ -167,7 +194,7 @@ public final class UploadManager {
 
 		if (chunk.seq() != upload.nextSeq || upload.received + chunk.data().length > upload.data.length) {
 			UPLOADS.remove(player.getUUID());
-			error(player, upload.id, "message.custom_discs.error.corrupt", "unexpected chunk");
+			uploadError(player, upload.id, "message.custom_discs.error.corrupt");
 			return;
 		}
 
@@ -177,18 +204,31 @@ public final class UploadManager {
 		upload.lastActivity = System.currentTimeMillis();
 
 		if (upload.received < upload.data.length) {
-			send(player, upload.id, UploadStatus.PROGRESS, upload.received, Component.empty());
+			status(player, upload.id, UploadStatus.PROGRESS, upload.received, Component.empty());
 			return;
 		}
 
 		UPLOADS.remove(player.getUUID());
 
-		if (!Hashing.sha256(upload.data).equals(upload.request.hash())) {
-			error(player, upload.id, "message.custom_discs.error.corrupt", "checksum mismatch");
+		if (!Hashing.sha256(upload.data).equals(upload.hash)) {
+			uploadError(player, upload.id, "message.custom_discs.error.corrupt");
 			return;
 		}
 
-		finish(player, upload.request, upload.data);
+		Object result = measure(upload.data);
+
+		if (result instanceof String errorKey) {
+			uploadError(player, upload.id, errorKey, DiscInfo.formatDuration(ServerConfig.get().maxDurationSeconds * 20));
+			return;
+		}
+
+		if (!TrackStore.write(upload.hash, upload.data)) {
+			uploadError(player, upload.id, "message.custom_discs.error.server_storage");
+			return;
+		}
+
+		DURATIONS.put(upload.hash, (Integer) result);
+		status(player, upload.id, UploadStatus.STORED, upload.received, Component.empty());
 	}
 
 	public static void handleCancel(ServerPlayer player, ModPayloads.UploadCancel cancel) {
@@ -199,56 +239,90 @@ public final class UploadManager {
 		}
 	}
 
-	private static void finish(ServerPlayer player, ModPayloads.UploadBegin request, byte[] data) {
+	public static void handleBurn(ServerPlayer player, ModPayloads.BurnDisc request) {
 		ServerConfig config = ServerConfig.get();
-		int id = request.uploadId();
-		OggInfo info;
 
-		try {
-			info = OggInfo.parse(data);
-		} catch (OggInfo.InvalidOggException e) {
-			error(player, id, "message.custom_discs.error.corrupt", e.getMessage());
+		if (!canBurn(player)) {
+			burnError(player, "message.custom_discs.error.no_permission");
 			return;
 		}
 
-		if (info.channels() != 1) {
-			// Minecraft only places mono sounds in the world; stereo would be heard at full volume everywhere.
-			error(player, id, "message.custom_discs.error.not_mono");
+		DiscBurnerMenu menu = openBurner(player, request.pos());
+
+		if (menu == null) {
+			burnError(player, "message.custom_discs.error.burner_closed");
 			return;
 		}
 
-		if (info.durationSeconds() > config.maxDurationSeconds + 1) {
-			error(player, id, "message.custom_discs.error.too_long", TrackInfo.formatDuration(config.maxDurationSeconds * 20));
-			return;
-		}
-
-		if (!TrackStore.has(request.hash()) && !TrackStore.write(request.hash(), data)) {
-			error(player, id, "message.custom_discs.error.server_storage");
-			return;
-		}
-
-		// The player might have moved items around during a long upload, so check again.
-		DiscBurnerMenu menu = openBurner(player, request);
-		String slotError = menu == null ? "message.custom_discs.error.burner_closed" : checkSlots(menu);
+		String slotError = checkSlots(menu);
 
 		if (slotError != null) {
-			error(player, id, slotError);
+			burnError(player, slotError);
 			return;
 		}
 
-		TrackInfo track = new TrackInfo(request.hash(), cleanText(request.title()), cleanText(request.artist()), info.durationTicks());
-		ItemStack disc = new ItemStack(ModRegistry.CUSTOM_MUSIC_DISC);
-		disc.set(ModRegistry.TRACK, track);
+		String title = cleanText(request.title());
+
+		if (title.isEmpty()) {
+			burnError(player, "message.custom_discs.error.no_title");
+			return;
+		}
+
+		if (request.tracks().isEmpty() || request.tracks().size() > config.maxTracksPerDisc) {
+			burnError(player, "message.custom_discs.error.too_many_tracks", config.maxTracksPerDisc);
+			return;
+		}
+
+		Long last = LAST_BURN.get(player.getUUID());
+		long waitMs = last == null ? 0 : last + config.burnCooldownSeconds * 1000L - System.currentTimeMillis();
+
+		if (waitMs > 0) {
+			burnError(player, "message.custom_discs.error.cooldown", (waitMs + 999) / 1000);
+			return;
+		}
+
+		List<DiscInfo.Track> tracks = new ArrayList<>();
+		long totalTicks = 0;
+
+		for (ModPayloads.TrackRequest requested : request.tracks()) {
+			Integer duration = Hashing.isValidHash(requested.hash()) ? storedDuration(requested.hash()) : null;
+
+			if (duration == null) {
+				burnError(player, "message.custom_discs.error.missing_track");
+				return;
+			}
+
+			String trackTitle = cleanText(requested.title());
+
+			if (request.tracks().size() == 1) {
+				trackTitle = title;
+			} else if (trackTitle.isEmpty()) {
+				trackTitle = "Track " + (tracks.size() + 1);
+			}
+
+			tracks.add(new DiscInfo.Track(requested.hash(), trackTitle, duration));
+			totalTicks += duration;
+			TrackStore.touch(requested.hash());
+		}
+
+		if (totalTicks > (config.maxDiscDurationSeconds + 1) * 20L) {
+			burnError(player, "message.custom_discs.error.disc_too_long", DiscInfo.formatDuration(config.maxDiscDurationSeconds * 20));
+			return;
+		}
+
+		DiscInfo disc = new DiscInfo(title, cleanText(request.artist()), request.explicit(), request.shuffle(), tracks);
+		ItemStack item = new ItemStack(ModRegistry.CUSTOM_MUSIC_DISC);
+		item.set(ModRegistry.DISC, disc);
 
 		Container container = menu.getContainer();
 		container.removeItem(DiscBurnerBlockEntity.SLOT_INPUT, 1);
-		container.setItem(DiscBurnerBlockEntity.SLOT_OUTPUT, disc);
+		container.setItem(DiscBurnerBlockEntity.SLOT_OUTPUT, item);
 		container.setChanged();
 		menu.broadcastChanges();
 
 		LAST_BURN.put(player.getUUID(), System.currentTimeMillis());
-		CustomDiscs.LOGGER.info("{} burned \"{}\" ({}, {} bytes)", player.getName().getString(), track.displayName().getString(), request.hash(), data.length);
-		send(player, id, UploadStatus.DONE, data.length, track.displayName());
+		CustomDiscs.LOGGER.info("{} burned \"{}\" ({} tracks)", player.getName().getString(), disc.displayName().getString(), tracks.size());
+		ServerPlayNetworking.send(player, new ModPayloads.BurnResult(true, disc.displayName()));
 	}
 
 	public static void tick() {
@@ -263,5 +337,6 @@ public final class UploadManager {
 	public static void clear() {
 		UPLOADS.clear();
 		LAST_BURN.clear();
+		DURATIONS.clear();
 	}
 }

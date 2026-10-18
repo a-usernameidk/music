@@ -16,6 +16,7 @@ public final class ServerHandlers {
 		ServerPlayNetworking.registerGlobalReceiver(ModPayloads.UploadBegin.TYPE, (payload, context) -> UploadManager.handleBegin(context.player(), payload));
 		ServerPlayNetworking.registerGlobalReceiver(ModPayloads.UploadChunk.TYPE, (payload, context) -> UploadManager.handleChunk(context.player(), payload));
 		ServerPlayNetworking.registerGlobalReceiver(ModPayloads.UploadCancel.TYPE, (payload, context) -> UploadManager.handleCancel(context.player(), payload));
+		ServerPlayNetworking.registerGlobalReceiver(ModPayloads.BurnDisc.TYPE, (payload, context) -> UploadManager.handleBurn(context.player(), payload));
 		ServerPlayNetworking.registerGlobalReceiver(ModPayloads.RequestTrack.TYPE, (payload, context) -> DownloadManager.handleRequest(context.player(), payload));
 		ServerPlayNetworking.registerGlobalReceiver(ModPayloads.TrackChunkAck.TYPE, (payload, context) -> DownloadManager.handleAck(context.player(), payload));
 
@@ -23,6 +24,8 @@ public final class ServerHandlers {
 			ServerConfig config = ServerConfig.get();
 			sender.sendPacket(new ModPayloads.ServerSettings(
 					config.maxDurationSeconds,
+					config.maxDiscDurationSeconds,
+					config.maxTracksPerDisc,
 					(int) Math.min(Integer.MAX_VALUE, config.maxFileBytes()),
 					config.maxBitrateKbps,
 					UploadManager.canBurn(handler.player)));

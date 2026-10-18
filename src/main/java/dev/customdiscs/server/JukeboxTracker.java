@@ -22,7 +22,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 
 import dev.customdiscs.ModRegistry;
-import dev.customdiscs.TrackInfo;
+import dev.customdiscs.DiscInfo;
 import dev.customdiscs.net.ModPayloads;
 
 /**
@@ -51,13 +51,13 @@ public final class JukeboxTracker {
 	}
 
 	private static final class Playing {
-		final TrackInfo track;
+		final DiscInfo disc;
 		final long startGameTime;
 		final Set<UUID> notified = new HashSet<>();
 		long lastSeenTick;
 
-		Playing(TrackInfo track, long startGameTime) {
-			this.track = track;
+		Playing(DiscInfo disc, long startGameTime) {
+			this.disc = disc;
 			this.startGameTime = startGameTime;
 		}
 	}
@@ -75,11 +75,11 @@ public final class JukeboxTracker {
 			return;
 		}
 
-		TrackInfo track = stack.get(ModRegistry.TRACK);
+		DiscInfo disc = stack.get(ModRegistry.DISC);
 		long elapsed = songPlayer.getTicksSinceSongStarted();
 
-		// The shared song entry is 2 hours long; stop at the real end of this track instead (same 1s margin as vanilla).
-		if (track == null || elapsed >= track.durationTicks() + 20L) {
+		// The shared song entry is 2 hours long; stop at the real end of this disc instead (same 1s margin as vanilla).
+		if (disc == null || elapsed >= disc.totalTicks() + 20L) {
 			songPlayer.stop(level, state);
 			return;
 		}
@@ -88,14 +88,14 @@ public final class JukeboxTracker {
 		long start = serverLevel.getGameTime() - elapsed;
 		Playing playing = PLAYING.get(key);
 
-		if (playing == null || !playing.track.equals(track) || Math.abs(playing.startGameTime - start) > 2) {
+		if (playing == null || !playing.disc.equals(disc) || Math.abs(playing.startGameTime - start) > 2) {
 			if (playing != null) {
 				sendStop(serverLevel.getServer(), key, playing);
 			}
 
-			playing = new Playing(track, start);
+			playing = new Playing(disc, start);
 			PLAYING.put(key, playing);
-			TrackStore.touch(track.hash());
+			disc.tracks().forEach(track -> TrackStore.touch(track.hash()));
 		}
 
 		playing.lastSeenTick = serverTick;
@@ -127,7 +127,7 @@ public final class JukeboxTracker {
 				boolean notified = playing.notified.contains(player.getUUID());
 
 				if (!notified && distanceSq <= START_RANGE * START_RANGE) {
-					ServerPlayNetworking.send(player, new ModPayloads.PlayCustomDisc(key.pos, playing.track, playing.startGameTime));
+					ServerPlayNetworking.send(player, new ModPayloads.PlayCustomDisc(key.pos, playing.disc, playing.startGameTime));
 					playing.notified.add(player.getUUID());
 				} else if (notified && distanceSq > STOP_RANGE * STOP_RANGE) {
 					if (sameLevel) {

@@ -90,7 +90,14 @@ public final class Ffmpeg {
 		return Optional.empty();
 	}
 
-	public record ProbeResult(double durationSeconds, boolean hasAudio, String title, String artist) {
+	/** What ffmpeg reports about a file. Tag values are empty strings and numbers 0 when missing. */
+	public record ProbeResult(double durationSeconds, boolean hasAudio, String title, String artist, String album, String albumArtist, int trackNumber, int discNumber) {
+	}
+
+	/** "3/12" or "3" -> 3; anything else -> 0. */
+	private static int leadingNumber(String value) {
+		Matcher matcher = Pattern.compile("^\\s*(\\d+)").matcher(value);
+		return matcher.find() ? Integer.parseInt(matcher.group(1)) : 0;
 	}
 
 	/** Reads duration and tags with {@code ffmpeg -i file} (it prints the info and exits with an error, which is expected). */
@@ -106,6 +113,9 @@ public final class Ffmpeg {
 		String title = "";
 		String artist = "";
 		String albumArtist = "";
+		String album = "";
+		int trackNumber = 0;
+		int discNumber = 0;
 
 		try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
 			String line;
@@ -148,6 +158,9 @@ public final class Ffmpeg {
 						case "title" -> title = value;
 						case "artist" -> artist = value;
 						case "album_artist" -> albumArtist = value;
+						case "album" -> album = value;
+						case "track" -> trackNumber = leadingNumber(value);
+						case "disc" -> discNumber = leadingNumber(value);
 						default -> {
 						}
 					}
@@ -159,7 +172,7 @@ public final class Ffmpeg {
 			process.destroyForcibly();
 		}
 
-		return new ProbeResult(duration, hasAudio, title, artist.isEmpty() ? albumArtist : artist);
+		return new ProbeResult(duration, hasAudio, title, artist.isEmpty() ? albumArtist : artist, album, albumArtist, trackNumber, discNumber);
 	}
 
 	public static final class ConversionException extends Exception {

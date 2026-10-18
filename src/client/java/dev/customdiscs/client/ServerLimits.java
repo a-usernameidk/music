@@ -10,7 +10,7 @@ public final class ServerLimits {
 	}
 
 	private static ModPayloads.ServerSettings defaults() {
-		return new ModPayloads.ServerSettings(600, 12 * 1024 * 1024, 128, true);
+		return new ModPayloads.ServerSettings(600, 4800, 30, 12 * 1024 * 1024, 128, true);
 	}
 
 	public static ModPayloads.ServerSettings get() {

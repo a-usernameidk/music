@@ -26,6 +26,8 @@ public final class ClientConfig {
 	public int bitrateKbps = 96;
 	/** Fill in Title and Artist from the file's tags when they are empty. */
 	public boolean prefillFromTags = true;
+	/** Don't play discs that their creator marked as explicit. */
+	public boolean muteExplicitDiscs = false;
 
 	public static ClientConfig get() {
 		return instance;
@@ -50,7 +52,10 @@ public final class ClientConfig {
 
 		instance.bitrateKbps = Math.clamp(instance.bitrateKbps, 32, 320);
 		instance.maxCacheSizeMb = Math.max(16, instance.maxCacheSizeMb);
+		save();
+	}
 
+	public static void save() {
 		try {
 			Files.createDirectories(PATH.getParent());
 			Files.writeString(PATH, GSON.toJson(instance));

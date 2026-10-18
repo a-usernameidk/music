@@ -3,7 +3,10 @@ package dev.customdiscs.client;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
@@ -19,7 +22,7 @@ import net.minecraft.network.chat.Component;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 
 import dev.customdiscs.CustomDiscs;
-import dev.customdiscs.TrackInfo;
+import dev.customdiscs.DiscInfo;
 import dev.customdiscs.client.audio.Ffmpeg;
 import dev.customdiscs.client.audio.FfmpegDownloader;
 import dev.customdiscs.client.net.TrackCache;
@@ -28,8 +31,11 @@ import dev.customdiscs.net.ModPayloads.UploadStatus;
 import dev.customdiscs.util.Hashing;
 
 /**
- * State behind the Disc Burner screen: the chosen file, the conversion, and the chunked upload. It lives outside
- * the screen so that resizing the window (which rebuilds the screen) does not lose progress.
+ * State behind the Disc Burner screen: the chosen files, the conversion, the chunked uploads and the final burn
+ * request. It lives outside the screen so that resizing the window (which rebuilds the screen) keeps progress.
+ *
+ * <p>One file makes a single; several files make an album disc. Each track is converted, then uploaded on its
+ * own (the server skips files it already has), and finally {@link ModPayloads.BurnDisc} lists them all.
  */
 public final class BurnController {
 	private static final int CLIENT_WINDOW_CHUNKS = 4;
@@ -40,39 +46,71 @@ public final class BurnController {
 	});
 
 	public enum Phase {
-		IDLE, PROBING, READY, CONVERTING, UPLOADING, DONE, ERROR, DOWNLOADING_FFMPEG
+		IDLE, PROBING, READY, CONVERTING, UPLOADING, BURNING, DONE, ERROR, DOWNLOADING_FFMPEG
+	}
+
+	/** A chosen file and what ffmpeg says about it. */
+	public record Selected(Path path, Ffmpeg.ProbeResult probe) {
+		public String trackTitle() {
+			if (!probe.title().isBlank()) {
+				return probe.title();
+			}
+
+			String name = path.getFileName().toString();
+			int dot = name.lastIndexOf('.');
+			return dot > 0 ? name.substring(0, dot) : name;
+		}
+	}
+
+	/** A converted track waiting to be uploaded. */
+	private record Prepared(String hash, byte[] data, String title) {
 	}
 
 	private static Phase phase = Phase.IDLE;
 	private static double progress;
 	private static Component message = Component.empty();
 
-	private static @Nullable Path selectedFile;
-	private static Ffmpeg.@Nullable ProbeResult probe;
+	private static List<Selected> selection = List.of();
 	private static String suggestedTitle = "";
 	private static String suggestedArtist = "";
 	private static boolean ffmpegMissing;
+	private static List<Path> pendingFiles = List.of();
 
 	private static int nextUploadId = 1;
-	private static @Nullable Upload upload;
+	private static @Nullable Job job;
 	private static AtomicBoolean cancelFlag = new AtomicBoolean();
 
 	private BurnController() {
 	}
 
-	private static final class Upload {
-		final int id;
-		final byte[] data;
-		final String hash;
+	/** An upload in progress: the converted tracks, which one is being sent, and the disc details. */
+	private static final class Job {
+		final BlockPos pos;
+		final String title;
+		final String artist;
+		final boolean explicit;
+		final boolean shuffle;
+		final List<Prepared> tracks;
+		final long totalBytes;
+		long doneBytes;
+		int index;
+		int uploadId;
 		int sent;
 		int nextSeq;
 		int acked;
-		boolean started;
 
-		Upload(int id, byte[] data, String hash) {
-			this.id = id;
-			this.data = data;
-			this.hash = hash;
+		Job(BlockPos pos, String title, String artist, boolean explicit, boolean shuffle, List<Prepared> tracks) {
+			this.pos = pos;
+			this.title = title;
+			this.artist = artist;
+			this.explicit = explicit;
+			this.shuffle = shuffle;
+			this.tracks = tracks;
+			this.totalBytes = tracks.stream().mapToLong(t -> t.data().length).sum();
+		}
+
+		Prepared current() {
+			return tracks.get(index);
 		}
 	}
 
@@ -93,22 +131,22 @@ public final class BurnController {
 	}
 
 	public static boolean isBusy() {
-		return phase == Phase.PROBING || phase == Phase.CONVERTING || phase == Phase.UPLOADING || phase == Phase.DOWNLOADING_FFMPEG;
+		return phase == Phase.PROBING || phase == Phase.CONVERTING || phase == Phase.UPLOADING || phase == Phase.BURNING || phase == Phase.DOWNLOADING_FFMPEG;
 	}
 
-	public static @Nullable Path selectedFile() {
-		return selectedFile;
-	}
-
-	public static Ffmpeg.@Nullable ProbeResult probe() {
-		return probe;
+	public static List<Selected> selection() {
+		return selection;
 	}
 
 	public static boolean ffmpegMissing() {
 		return ffmpegMissing;
 	}
 
-	/** Title/artist read from the file's tags, handed to the screen once. */
+	public static int totalTicks() {
+		return (int) (selection.stream().mapToDouble(s -> Math.max(0, s.probe().durationSeconds())).sum() * 20);
+	}
+
+	/** Title/artist read from the files' tags, handed to the screen once. */
 	public static String takeSuggestedTitle() {
 		String value = suggestedTitle;
 		suggestedTitle = "";
@@ -128,12 +166,19 @@ public final class BurnController {
 	}
 
 	private static void fail(Component reason) {
-		upload = null;
+		job = null;
 		set(Phase.ERROR, 0, reason);
 	}
 
 	private static void onClientThread(Runnable runnable) {
 		Minecraft.getInstance().execute(runnable);
+	}
+
+	/** Shows a message in the status line without changing what is selected. */
+	public static void showMessage(Component text) {
+		if (!isBusy()) {
+			set(phase == Phase.ERROR ? (selection.isEmpty() ? Phase.IDLE : Phase.READY) : phase, progress, text);
+		}
 	}
 
 	public static boolean isSupportedFile(Path path) {
@@ -142,31 +187,28 @@ public final class BurnController {
 		return dot >= 0 && Ffmpeg.EXTENSIONS.contains(name.substring(dot + 1));
 	}
 
-	/** Shows a message in the status line without changing what is selected. */
-	public static void showMessage(Component text) {
-		if (!isBusy()) {
-			set(phase == Phase.ERROR ? Phase.IDLE : phase, progress, text);
-		}
-	}
-
-	/** A file was dropped on the screen or picked with Browse. */
-	public static void selectFile(Path path) {
+	/** Files were dropped on the screen or picked with Browse. One file makes a single, several make an album. */
+	public static void selectFiles(List<Path> paths) {
 		if (isBusy()) {
 			return;
 		}
 
-		if (!Files.isRegularFile(path)) {
-			fail(Component.translatable("message.custom_discs.error.not_a_file"));
+		List<Path> files = paths.stream().filter(Files::isRegularFile).filter(BurnController::isSupportedFile).distinct().toList();
+
+		if (files.isEmpty()) {
+			fail(Component.translatable("message.custom_discs.error.unsupported", paths.isEmpty() ? "?" : paths.getFirst().getFileName().toString()));
 			return;
 		}
 
-		if (!isSupportedFile(path)) {
-			fail(Component.translatable("message.custom_discs.error.unsupported", path.getFileName().toString()));
+		int maxTracks = ServerLimits.get().maxTracks();
+
+		if (files.size() > maxTracks) {
+			fail(Component.translatable("message.custom_discs.error.too_many_tracks", maxTracks));
 			return;
 		}
 
-		selectedFile = path;
-		probe = null;
+		pendingFiles = files;
+		selection = List.of();
 		Optional<Path> ffmpeg = Ffmpeg.locate();
 		ffmpegMissing = ffmpeg.isEmpty();
 
@@ -178,53 +220,78 @@ public final class BurnController {
 		set(Phase.PROBING, 0, Component.translatable("message.custom_discs.reading"));
 
 		WORKER.execute(() -> {
+			List<Selected> probed = new ArrayList<>();
+
 			try {
-				Ffmpeg.ProbeResult result = Ffmpeg.probe(ffmpeg.get(), path);
-				onClientThread(() -> onProbed(path, result));
+				for (int i = 0; i < files.size(); i++) {
+					probed.add(new Selected(files.get(i), Ffmpeg.probe(ffmpeg.get(), files.get(i))));
+					double done = (i + 1.0) / files.size();
+					onClientThread(() -> progress = done);
+				}
+
+				onClientThread(() -> onProbed(files, probed));
 			} catch (IOException | InterruptedException e) {
-				CustomDiscs.LOGGER.warn("Could not read {}", path, e);
-				onClientThread(() -> fail(Component.translatable("message.custom_discs.error.ffmpeg_failed", e.getMessage())));
+				CustomDiscs.LOGGER.warn("Could not read {}", files, e);
+				onClientThread(() -> fail(Component.translatable("message.custom_discs.error.ffmpeg_failed", String.valueOf(e.getMessage()))));
 			}
 		});
 	}
 
-	private static void onProbed(Path path, Ffmpeg.ProbeResult result) {
-		if (!path.equals(selectedFile)) {
+	private static void onProbed(List<Path> files, List<Selected> probed) {
+		if (files != pendingFiles) {
 			return;
 		}
 
-		if (!result.hasAudio()) {
-			fail(Component.translatable("message.custom_discs.error.no_audio"));
-			return;
+		ModPayloads.ServerSettings limits = ServerLimits.get();
+
+		for (Selected selected : probed) {
+			if (!selected.probe().hasAudio()) {
+				fail(Component.translatable("message.custom_discs.error.no_audio_in", selected.path().getFileName().toString()));
+				return;
+			}
+
+			if (selected.probe().durationSeconds() > limits.maxTrackSeconds() + 1) {
+				fail(Component.translatable("message.custom_discs.error.track_too_long", selected.path().getFileName().toString(), DiscInfo.formatDuration(limits.maxTrackSeconds() * 20)));
+				return;
+			}
 		}
 
-		int maxSeconds = ServerLimits.get().maxDurationSeconds();
+		// Album order: disc number, then track number, then file name.
+		List<Selected> sorted = new ArrayList<>(probed);
+		sorted.sort(Comparator.<Selected>comparingInt(s -> s.probe().discNumber())
+				.thenComparingInt(s -> s.probe().trackNumber() == 0 ? Integer.MAX_VALUE : s.probe().trackNumber())
+				.thenComparing(s -> s.path().getFileName().toString(), String.CASE_INSENSITIVE_ORDER));
+		selection = List.copyOf(sorted);
 
-		if (result.durationSeconds() > maxSeconds + 1) {
-			fail(Component.translatable("message.custom_discs.error.too_long", TrackInfo.formatDuration(maxSeconds * 20)));
+		if (totalTicks() > (limits.maxDiscSeconds() + 1) * 20) {
+			fail(Component.translatable("message.custom_discs.error.disc_too_long", DiscInfo.formatDuration(limits.maxDiscSeconds() * 20)));
 			return;
 		}
-
-		probe = result;
 
 		if (ClientConfig.get().prefillFromTags) {
-			suggestedTitle = result.title();
-			suggestedArtist = result.artist();
+			Ffmpeg.ProbeResult first = selection.getFirst().probe();
+
+			if (selection.size() == 1) {
+				suggestedTitle = first.title();
+				suggestedArtist = first.artist();
+			} else {
+				suggestedTitle = first.album();
+				suggestedArtist = first.albumArtist().isBlank() ? first.artist() : first.albumArtist();
+			}
 		}
 
 		set(Phase.READY, 0, Component.empty());
 	}
 
 	public static boolean canBurn() {
-		return probe != null && selectedFile != null && !isBusy() && ServerLimits.get().canBurn();
+		return !selection.isEmpty() && !isBusy() && ServerLimits.get().canBurn();
 	}
 
-	public static void burn(BlockPos burnerPos, String title, String artist) {
-		Path input = selectedFile;
-		Ffmpeg.ProbeResult info = probe;
+	public static void burn(BlockPos burnerPos, String title, String artist, boolean explicit, boolean shuffle) {
+		List<Selected> files = selection;
 		Optional<Path> ffmpeg = Ffmpeg.locate();
 
-		if (input == null || info == null || isBusy()) {
+		if (files.isEmpty() || isBusy()) {
 			return;
 		}
 
@@ -237,26 +304,45 @@ public final class BurnController {
 		AtomicBoolean cancelled = new AtomicBoolean();
 		cancelFlag = cancelled;
 		int bitrate = ServerLimits.bitrateKbps();
+		int maxBytes = ServerLimits.get().maxFileBytes();
 		set(Phase.CONVERTING, 0, Component.translatable("message.custom_discs.converting", bitrate));
 
 		WORKER.execute(() -> {
+			List<Prepared> prepared = new ArrayList<>();
 			Path output = null;
 
 			try {
 				Files.createDirectories(ClientConfig.dataDir().resolve("tmp"));
 				output = Files.createTempFile(ClientConfig.dataDir().resolve("tmp"), "burn", ".ogg");
-				Ffmpeg.convert(ffmpeg.get(), input, output, bitrate, info.durationSeconds(),
-						p -> onClientThread(() -> {
-							if (phase == Phase.CONVERTING) {
-								progress = p;
-							}
-						}),
-						cancelled::get);
-				byte[] data = Files.readAllBytes(output);
-				String hash = Hashing.sha256(data);
+
+				for (int i = 0; i < files.size(); i++) {
+					Selected file = files.get(i);
+					int index = i;
+
+					if (files.size() > 1) {
+						onClientThread(() -> message = Component.translatable("message.custom_discs.converting_track", index + 1, files.size(), bitrate));
+					}
+
+					Ffmpeg.convert(ffmpeg.get(), file.path(), output, bitrate, file.probe().durationSeconds(),
+							p -> onClientThread(() -> {
+								if (phase == Phase.CONVERTING) {
+									progress = (index + p) / files.size();
+								}
+							}),
+							cancelled::get);
+					byte[] data = Files.readAllBytes(output);
+
+					if (data.length > maxBytes) {
+						onClientThread(() -> fail(Component.translatable("message.custom_discs.error.track_too_large", file.path().getFileName().toString(), maxBytes / (1024 * 1024))));
+						return;
+					}
+
+					prepared.add(new Prepared(Hashing.sha256(data), data, file.trackTitle()));
+				}
+
 				onClientThread(() -> {
 					if (!cancelled.get()) {
-						startUpload(burnerPos, title, artist, data, hash);
+						startUpload(new Job(burnerPos, title, artist, explicit, shuffle, prepared));
 					}
 				});
 			} catch (Ffmpeg.ConversionException e) {
@@ -264,85 +350,107 @@ public final class BurnController {
 			} catch (InterruptedException e) {
 				// Cancelled.
 			} catch (IOException e) {
-				CustomDiscs.LOGGER.warn("Conversion of {} failed", input, e);
-				onClientThread(() -> fail(Component.translatable("message.custom_discs.error.ffmpeg_failed", e.getMessage())));
+				CustomDiscs.LOGGER.warn("Conversion failed", e);
+				onClientThread(() -> fail(Component.translatable("message.custom_discs.error.ffmpeg_failed", String.valueOf(e.getMessage()))));
 			} finally {
 				if (output != null) {
 					try {
 						Files.deleteIfExists(output);
 					} catch (IOException ignored) {
-						// Temp file; cleaned up next time.
+						// Temp file.
 					}
 				}
 			}
 		});
 	}
 
-	private static void startUpload(BlockPos pos, String title, String artist, byte[] data, String hash) {
-		int maxBytes = ServerLimits.get().maxFileBytes();
-
-		if (data.length > maxBytes) {
-			fail(Component.translatable("message.custom_discs.error.too_large", maxBytes / (1024 * 1024)));
-			return;
-		}
-
-		// Keep a copy so this client never has to download its own disc.
-		TrackCache.store(hash, data);
-
-		upload = new Upload(nextUploadId++, data, hash);
-		set(Phase.UPLOADING, 0, Component.translatable("message.custom_discs.uploading", String.format("%.1f", data.length / 1024.0 / 1024.0)));
-		ClientPlayNetworking.send(new ModPayloads.UploadBegin(upload.id, pos, title, artist, hash, data.length));
+	private static void startUpload(Job newJob) {
+		// Keep copies so this client never has to download its own disc.
+		newJob.tracks.forEach(track -> TrackCache.store(track.hash(), track.data()));
+		job = newJob;
+		set(Phase.UPLOADING, 0, Component.translatable("message.custom_discs.uploading", String.format("%.1f", newJob.totalBytes / 1024.0 / 1024.0)));
+		beginTrack(newJob);
 	}
 
-	private static void sendChunks(Upload current) {
-		while (current.sent < current.data.length && current.nextSeq - current.acked < CLIENT_WINDOW_CHUNKS) {
-			int to = Math.min(current.data.length, current.sent + ModPayloads.CHUNK_SIZE);
-			ClientPlayNetworking.send(new ModPayloads.UploadChunk(current.id, current.nextSeq, Arrays.copyOfRange(current.data, current.sent, to)));
+	private static void beginTrack(Job current) {
+		Prepared track = current.current();
+		current.uploadId = nextUploadId++;
+		current.sent = 0;
+		current.nextSeq = 0;
+		current.acked = 0;
+		ClientPlayNetworking.send(new ModPayloads.UploadBegin(current.uploadId, current.pos, track.hash(), track.data().length));
+	}
+
+	private static void sendChunks(Job current) {
+		byte[] data = current.current().data();
+
+		while (current.sent < data.length && current.nextSeq - current.acked < CLIENT_WINDOW_CHUNKS) {
+			int to = Math.min(data.length, current.sent + ModPayloads.CHUNK_SIZE);
+			ClientPlayNetworking.send(new ModPayloads.UploadChunk(current.uploadId, current.nextSeq, Arrays.copyOfRange(data, current.sent, to)));
 			current.sent = to;
 			current.nextSeq++;
 		}
 	}
 
 	public static void handleStatus(UploadStatus status) {
-		Upload current = upload;
+		Job current = job;
 
-		if (current == null || current.id != status.uploadId()) {
+		if (current == null || current.uploadId != status.uploadId() || phase != Phase.UPLOADING) {
 			return;
 		}
 
 		switch (status.state()) {
-			case UploadStatus.READY -> {
-				current.started = true;
-				sendChunks(current);
-			}
+			case UploadStatus.READY -> sendChunks(current);
 			case UploadStatus.PROGRESS -> {
 				// The server acknowledges every chunk in order, so the ack count follows from the bytes received.
 				current.acked = (status.received() + ModPayloads.CHUNK_SIZE - 1) / ModPayloads.CHUNK_SIZE;
-				progress = (double) status.received() / current.data.length;
+				progress = (double) (current.doneBytes + status.received()) / current.totalBytes;
 				sendChunks(current);
 			}
-			case UploadStatus.DONE -> {
-				upload = null;
-				selectedFile = null;
-				probe = null;
-				set(Phase.DONE, 1, Component.translatable("message.custom_discs.done", status.message()));
+			case UploadStatus.STORED -> {
+				current.doneBytes += current.current().data().length;
+				progress = (double) current.doneBytes / current.totalBytes;
+				current.index++;
+
+				if (current.index < current.tracks.size()) {
+					beginTrack(current);
+				} else {
+					set(Phase.BURNING, 1, Component.translatable("message.custom_discs.burning"));
+					List<ModPayloads.TrackRequest> tracks = current.tracks.stream().map(t -> new ModPayloads.TrackRequest(t.hash(), t.title())).toList();
+					ClientPlayNetworking.send(new ModPayloads.BurnDisc(current.pos, current.title, current.artist, current.explicit, current.shuffle, tracks));
+				}
 			}
 			default -> fail(status.message());
+		}
+	}
+
+	public static void handleBurnResult(ModPayloads.BurnResult result) {
+		if (phase != Phase.BURNING) {
+			return;
+		}
+
+		job = null;
+
+		if (result.success()) {
+			selection = List.of();
+			set(Phase.DONE, 1, Component.translatable("message.custom_discs.done", result.message()));
+		} else {
+			set(Phase.ERROR, 0, result.message());
 		}
 	}
 
 	/** Screen closed: stop converting or uploading, since the server needs the burner open to finish. */
 	public static void cancel() {
 		cancelFlag.set(true);
-		Upload current = upload;
+		Job current = job;
 
 		if (current != null) {
-			ClientPlayNetworking.send(new ModPayloads.UploadCancel(current.id));
-			upload = null;
+			ClientPlayNetworking.send(new ModPayloads.UploadCancel(current.uploadId));
+			job = null;
 		}
 
-		if (isBusy() && phase != Phase.DOWNLOADING_FFMPEG && phase != Phase.PROBING) {
-			set(probe != null ? Phase.READY : Phase.IDLE, 0, Component.translatable("message.custom_discs.cancelled"));
+		if (phase == Phase.CONVERTING || phase == Phase.UPLOADING || phase == Phase.BURNING) {
+			set(selection.isEmpty() ? Phase.IDLE : Phase.READY, 0, Component.translatable("message.custom_discs.cancelled"));
 		}
 	}
 
@@ -364,8 +472,8 @@ public final class BurnController {
 					ffmpegMissing = false;
 					set(Phase.IDLE, 0, Component.translatable("message.custom_discs.ffmpeg_ready"));
 
-					if (selectedFile != null) {
-						selectFile(selectedFile);
+					if (!pendingFiles.isEmpty()) {
+						selectFiles(pendingFiles);
 					}
 				});
 			} catch (IOException | InterruptedException e) {
@@ -378,9 +486,9 @@ public final class BurnController {
 	/** Disconnected: forget everything tied to the old server. */
 	public static void reset() {
 		cancelFlag.set(true);
-		upload = null;
-		selectedFile = null;
-		probe = null;
+		job = null;
+		selection = List.of();
+		pendingFiles = List.of();
 		set(Phase.IDLE, 0, Component.empty());
 	}
 }

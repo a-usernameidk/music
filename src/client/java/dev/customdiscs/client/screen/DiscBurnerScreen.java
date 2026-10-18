@@ -11,16 +11,17 @@ import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.entity.player.Inventory;
 
 import dev.customdiscs.ModRegistry;
-import dev.customdiscs.TrackInfo;
+import dev.customdiscs.DiscInfo;
 import dev.customdiscs.client.BurnController;
 import dev.customdiscs.client.ServerLimits;
-import dev.customdiscs.client.audio.Ffmpeg;
 import dev.customdiscs.client.audio.FfmpegDownloader;
 import dev.customdiscs.client.audio.NativeFilePicker;
 import dev.customdiscs.menu.DiscBurnerMenu;
@@ -36,12 +37,15 @@ public class DiscBurnerScreen extends AbstractContainerScreen<DiscBurnerMenu> {
 	private static final int SLOT_FILL = 0xFF8B8B8B;
 	private static final int PROGRESS = 0xFF3FBF3F;
 
-	private static final int STATUS_Y = 79;
-	private static final int PROGRESS_Y = 91;
+	private static final int FILE_Y = 79;
+	private static final int STATUS_Y = 90;
+	private static final int PROGRESS_Y = 101;
 
 	// Kept between openings so a half-typed title survives closing the screen.
 	private static String titleDraft = "";
 	private static String artistDraft = "";
+	private static boolean explicitDraft;
+	private static boolean shuffleDraft;
 	private static @Nullable Path lastDirectory;
 
 	private EditBox titleBox;
@@ -49,11 +53,11 @@ public class DiscBurnerScreen extends AbstractContainerScreen<DiscBurnerMenu> {
 	private Button burnButton;
 	private Button browseButton;
 	private Button ffmpegButton;
+	private Button explicitButton;
+	private Button shuffleButton;
 
 	public DiscBurnerScreen(DiscBurnerMenu menu, Inventory inventory, Component title) {
-		super(menu, inventory, title);
-		imageWidth = DiscBurnerMenu.IMAGE_WIDTH;
-		imageHeight = DiscBurnerMenu.IMAGE_HEIGHT;
+		super(menu, inventory, title, DiscBurnerMenu.IMAGE_WIDTH, DiscBurnerMenu.IMAGE_HEIGHT);
 		inventoryLabelY = DiscBurnerMenu.INVENTORY_Y - 11;
 	}
 
@@ -72,14 +76,14 @@ public class DiscBurnerScreen extends AbstractContainerScreen<DiscBurnerMenu> {
 		int y = top();
 
 		titleBox = new EditBox(font, x + 8, y + 18, 160, 16, Component.translatable("gui.custom_discs.title"));
-		titleBox.setMaxLength(TrackInfo.MAX_TEXT_LENGTH);
+		titleBox.setMaxLength(DiscInfo.MAX_TEXT_LENGTH);
 		titleBox.setHint(Component.translatable("gui.custom_discs.title"));
 		titleBox.setValue(titleDraft);
 		titleBox.setResponder(value -> titleDraft = value);
 		addRenderableWidget(titleBox);
 
 		artistBox = new EditBox(font, x + 8, y + 38, 160, 16, Component.translatable("gui.custom_discs.artist"));
-		artistBox.setMaxLength(TrackInfo.MAX_TEXT_LENGTH);
+		artistBox.setMaxLength(DiscInfo.MAX_TEXT_LENGTH);
 		artistBox.setHint(Component.translatable("gui.custom_discs.artist"));
 		artistBox.setValue(artistDraft);
 		artistBox.setResponder(value -> artistDraft = value);
@@ -87,11 +91,22 @@ public class DiscBurnerScreen extends AbstractContainerScreen<DiscBurnerMenu> {
 
 		browseButton = addRenderableWidget(Button.builder(Component.translatable("gui.custom_discs.browse"), button -> browse())
 				.pos(x + 8, y + 58)
-				.size(60, 16)
+				.size(50, 16)
+				.tooltip(Tooltip.create(Component.translatable("gui.custom_discs.browse.tooltip")))
 				.build());
 
+		explicitButton = addRenderableWidget(Button.builder(explicitLabel(), button -> {
+			explicitDraft = !explicitDraft;
+			button.setMessage(explicitLabel());
+		}).pos(x + 61, y + 58).size(52, 16).tooltip(Tooltip.create(Component.translatable("gui.custom_discs.explicit.tooltip"))).build());
+
+		shuffleButton = addRenderableWidget(Button.builder(shuffleLabel(), button -> {
+			shuffleDraft = !shuffleDraft;
+			button.setMessage(shuffleLabel());
+		}).pos(x + 116, y + 58).size(52, 16).tooltip(Tooltip.create(Component.translatable("gui.custom_discs.shuffle.tooltip"))).build());
+
 		ffmpegButton = addRenderableWidget(Button.builder(Component.translatable("gui.custom_discs.download_ffmpeg"), button -> BurnController.downloadFfmpeg())
-				.pos(x + 72, y + 58)
+				.pos(x + 72, y + FILE_Y - 4)
 				.size(96, 16)
 				.build());
 
@@ -101,6 +116,14 @@ public class DiscBurnerScreen extends AbstractContainerScreen<DiscBurnerMenu> {
 				.build());
 
 		updateWidgets();
+	}
+
+	private static Component explicitLabel() {
+		return Component.translatable(explicitDraft ? "gui.custom_discs.explicit_on" : "gui.custom_discs.explicit_off");
+	}
+
+	private static Component shuffleLabel() {
+		return Component.translatable(shuffleDraft ? "gui.custom_discs.shuffle_on" : "gui.custom_discs.shuffle_off");
 	}
 
 	private boolean slotsReady() {
@@ -127,14 +150,18 @@ public class DiscBurnerScreen extends AbstractContainerScreen<DiscBurnerMenu> {
 		ffmpegButton.active = !busy;
 		titleBox.setEditable(!busy);
 		artistBox.setEditable(!busy);
+		explicitButton.active = !busy;
+		shuffleButton.active = !busy && BurnController.selection().size() > 1;
+		titleBox.setHint(Component.translatable(BurnController.selection().size() > 1 ? "gui.custom_discs.album_title" : "gui.custom_discs.title"));
 	}
 
 	private static String truncate(String text) {
-		return text.length() > TrackInfo.MAX_TEXT_LENGTH ? text.substring(0, TrackInfo.MAX_TEXT_LENGTH) : text;
+		return text.length() > DiscInfo.MAX_TEXT_LENGTH ? text.substring(0, DiscInfo.MAX_TEXT_LENGTH) : text;
 	}
 
 	private void burn() {
-		BurnController.burn(menu.getPos(), titleBox.getValue().strip(), artistBox.getValue().strip());
+		boolean album = BurnController.selection().size() > 1;
+		BurnController.burn(menu.getPos(), titleBox.getValue().strip(), artistBox.getValue().strip(), explicitDraft, album && shuffleDraft);
 	}
 
 	private void browse() {
@@ -145,31 +172,29 @@ public class DiscBurnerScreen extends AbstractContainerScreen<DiscBurnerMenu> {
 			if (files == null) {
 				minecraft.execute(() -> BurnController.showMessage(Component.translatable("message.custom_discs.error.no_file_dialog")));
 			} else if (!files.isEmpty()) {
-				minecraft.execute(() -> onFileChosen(files.getFirst()));
+				minecraft.execute(() -> onFilesChosen(files));
 			}
 		}, "Custom Discs file picker");
 		thread.setDaemon(true);
 		thread.start();
 	}
 
-	private static void onFileChosen(Path path) {
-		Path parent = path.toAbsolutePath().getParent();
+	private static void onFilesChosen(List<Path> paths) {
+		Path parent = paths.getFirst().toAbsolutePath().getParent();
 
 		if (parent != null && Files.isDirectory(parent)) {
 			lastDirectory = parent;
 		}
 
-		BurnController.selectFile(path);
+		BurnController.selectFiles(paths);
 	}
 
-	/** Files dragged from the desktop onto the game window, the same hook the resource pack screen uses. */
+	/** Files dragged from the desktop onto the game window. Several files make an album disc. */
 	@Override
 	public void onFilesDrop(List<Path> paths) {
-		paths.stream()
-				.filter(BurnController::isSupportedFile)
-				.findFirst()
-				.or(() -> paths.stream().findFirst())
-				.ifPresent(DiscBurnerScreen::onFileChosen);
+		if (!paths.isEmpty()) {
+			onFilesChosen(paths);
+		}
 	}
 
 	@Override
@@ -239,11 +264,28 @@ public class DiscBurnerScreen extends AbstractContainerScreen<DiscBurnerMenu> {
 		int x = left();
 		int y = top();
 
-		Path file = BurnController.selectedFile();
-		String fileText = file != null ? file.getFileName().toString() : Component.translatable("gui.custom_discs.drop_hint").getString();
+		List<BurnController.Selected> selection = BurnController.selection();
+		String fileText = switch (selection.size()) {
+			case 0 -> Component.translatable("gui.custom_discs.drop_hint").getString();
+			case 1 -> selection.getFirst().path().getFileName().toString();
+			default -> Component.translatable("gui.custom_discs.files_selected", selection.size()).getString();
+		};
 
 		if (!ffmpegButton.visible) {
-			graphics.text(font, font.plainSubstrByWidth(fileText, 96), x + 72, y + 62, TEXT_COLOR, false);
+			graphics.text(font, font.plainSubstrByWidth(fileText, 160), x + 8, y + FILE_Y, TEXT_COLOR, false);
+			boolean hoveringFile = mouseX >= x + 8 && mouseX < x + 168 && mouseY >= y + FILE_Y - 1 && mouseY < y + FILE_Y + 9;
+
+			if (hoveringFile && selection.size() > 1) {
+				// List the album's tracks in the tooltip.
+				MutableComponent list = Component.empty();
+
+				for (int i = 0; i < selection.size(); i++) {
+					BurnController.Selected selected = selection.get(i);
+					list.append((i > 0 ? "\n" : "") + (i + 1) + ". " + selected.trackTitle() + "  " + DiscInfo.formatDuration((int) (selected.probe().durationSeconds() * 20)));
+				}
+
+				graphics.setTooltipForNextFrame(font, list, mouseX, mouseY);
+			}
 		}
 
 		Component status = statusLine();
@@ -266,22 +308,23 @@ public class DiscBurnerScreen extends AbstractContainerScreen<DiscBurnerMenu> {
 			return Component.translatable("message.custom_discs.error.no_permission");
 		}
 
-		Ffmpeg.ProbeResult probe = BurnController.probe();
+		List<BurnController.Selected> selection = BurnController.selection();
 
 		return switch (BurnController.phase()) {
 			case READY -> {
-				if (probe == null) {
+				if (selection.isEmpty()) {
 					yield Component.empty();
 				}
 
-				double megabytes = ServerLimits.bitrateKbps() * Math.max(0, probe.durationSeconds()) / 8.0 / 1024.0;
-				Component length = Component.literal(probe.durationSeconds() > 0 ? TrackInfo.formatDuration((int) (probe.durationSeconds() * 20)) : "?");
+				int ticks = BurnController.totalTicks();
+				double megabytes = ServerLimits.bitrateKbps() * (ticks / 20.0) / 8.0 / 1024.0;
+				Component length = Component.literal(DiscInfo.formatDuration(ticks));
 
 				if (!slotsReady()) {
 					yield Component.translatable("gui.custom_discs.ready_need_disc", length);
 				}
 
-				yield Component.translatable("gui.custom_discs.ready", length, String.format("%.1f", megabytes));
+				yield Component.translatable(selection.size() > 1 ? "gui.custom_discs.ready_album" : "gui.custom_discs.ready", length, String.format("%.1f", megabytes), selection.size());
 			}
 			case IDLE -> BurnController.message().getString().isEmpty() ? Component.translatable("gui.custom_discs.idle") : BurnController.message();
 			default -> BurnController.message();
