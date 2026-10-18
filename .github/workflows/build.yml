@@ -17,6 +17,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: chmod +x gradlew
       - run: ./gradlew build --stacktrace
+      - name: Server smoke test
+        run: .github/scripts/server-smoke-test.sh
       - name: Dump Minecraft API signatures
         if: always()
         run: >
@@ -41,8 +43,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: api-dump
-          path: api-dump.txt
+          name: logs
+          path: |
+            api-dump.txt
+            server.log
       - uses: actions/upload-artifact@v4
         with:
           name: custom-discs-mod
