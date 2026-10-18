@@ -18,8 +18,29 @@ eject and the "Now Playing" message all work.
 4. **Drag an audio file onto the game window**, or press **Browse...** to pick one.
    MP3, FLAC, M4A/AAC, WAV, OGG and OPUS all work (anything ffmpeg can read).
 5. Type a **song title** and an **artist**. If the file has tags, these are filled in for you.
-6. Press **Burn**. The song is compressed and uploaded, and the finished disc appears in the right slot.
-7. Put the disc in any jukebox.
+6. Optional: click **Clean** to switch it to **Explicit** (see below).
+7. Press **Burn**. The song is compressed and uploaded, and the finished disc appears in the right slot.
+8. Put the disc in any jukebox.
+
+### Albums
+
+Pick **several files** in Browse (or drag several onto the window) to burn a whole album onto one disc. Tracks
+are ordered by their disc and track number tags, then by file name. Album title and artist come from the tags.
+Hover the "N files" line to see the track list. In a jukebox the tracks play one after another, and the tooltip
+lists them.
+
+### Shuffle
+
+For albums, click **In order** to switch it to **Shuffle** before burning. You can change it later by sneaking
+and using the disc while holding it. Each time the disc starts, it picks a new random order. Everyone nearby
+hears the same order.
+
+### Explicit discs
+
+Click **Clean** to switch it to **Explicit** when burning. Explicit discs show a red "Explicit" line in their
+tooltip. Any player can type **`/customdiscs`** and turn on **Mute explicit discs**. They won't hear those
+discs, and they'll see "Explicit disc muted" instead. It's a per-player setting. Other players still hear the
+disc, and it only works if whoever burned the disc marked it.
 
 ## About MP3 and Ogg Vorbis
 
@@ -60,8 +81,8 @@ with [Fabric API](https://modrinth.com/mod/fabric-api).
 - **Late joiners hear the right part of the song.** If you walk into range or log in in the middle of a song,
   playback starts at the same spot as for everyone else.
 
-The server stores songs in `<world>/data/custom_discs/<hash>.ogg`. A disc only stores the hash, title, artist and
-length, so discs are tiny and can be copied, stored in chests or moved around freely.
+The server stores songs in `<world>/data/custom_discs/<hash>.ogg`. A disc only stores the titles, artist,
+lengths and hashes, so discs are tiny and can be copied, stored in chests or moved around freely.
 
 ## Configuration
 
@@ -69,15 +90,17 @@ length, so discs are tiny and can be copied, stored in chests or moved around fr
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `maxDurationSeconds` | 600 | Longest song that can be burned (max 7200). |
-| `maxFileSizeMb` | 12 | Largest compressed file that can be uploaded. |
+| `maxDurationSeconds` | 600 | Longest single track. |
+| `maxDiscDurationSeconds` | 4800 | Longest whole disc, all album tracks together (max 7200). |
+| `maxTracksPerDisc` | 30 | Most tracks on one album disc (max 64). |
+| `maxFileSizeMb` | 12 | Largest compressed file for one track. |
 | `maxBitrateKbps` | 128 | Bitrate cap. Clients use the lower of this and their own setting. |
 | `opsOnly` | false | Only operators can burn discs. Permission mods can use the node `custom_discs:burn` either way. |
 | `burnCooldownSeconds` | 10 | Wait time between burns for each player. |
 | `transferWindowChunks` | 4 | How many 30 KB chunks may be in flight per download. Lower it for very slow relays. |
 | `deleteUnusedTracksAfterDays` | 0 | Delete stored songs nobody has burned, played or downloaded for this many days. 0 = never. Songs on discs sitting in chests count as unused, so only turn this on if that is okay. |
 
-`config/custom_discs-client.json`:
+`config/custom_discs-client.json` (or type `/customdiscs` in game for the settings screen):
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -85,6 +108,7 @@ length, so discs are tiny and can be copied, stored in chests or moved around fr
 | `ffmpegPath` | `""` | Full path to ffmpeg, if it isn't found automatically. |
 | `bitrateKbps` | 96 | Bitrate for songs you burn (32-320, capped by the server). |
 | `prefillFromTags` | true | Fill in Title and Artist from the file's tags. |
+| `muteExplicitDiscs` | false | Don't play discs marked explicit. |
 
 ## Building
 
@@ -104,27 +128,20 @@ Versions are in `gradle.properties` and match the Fabric example mod for 26.3. T
 - `custom_discs:burned` (`data/custom_discs/jukebox_song/burned.json`) is one shared jukebox song entry that
   every burned disc points to. Vanilla handles inserting, ejecting, hoppers and the comparator signal through it.
   The entry's own sound is silent.
-- A mixin at the start of `JukeboxBlockEntity.tick` stops the song when the real track ends (from the disc's
-  `custom_discs:track` component). It also tells `JukeboxTracker` the jukebox is still playing. The tracker
+- A mixin at the start of `JukeboxBlockEntity.tick` stops the song when the last track ends (from the disc's
+  `custom_discs:disc` component). It also tells `JukeboxTracker` the jukebox is still playing. The tracker
   sends play/stop packets to players as they come into or leave range, and a jukebox that stops ticking
   (ejected, broken, unloaded) counts as stopped.
-- On the client, `CustomDiscSoundInstance` plays the cached file at the jukebox, with linear falloff to 64
+- On the client, `JukeboxSounds` works out every tick which track should be playing from the start time, the
+  track lengths and the shuffle order. The shuffle order is seeded from the jukebox position and start time, so
+  everyone hears the same thing. `CustomDiscSoundInstance` plays the cached file at the jukebox, with linear falloff to 64
   blocks like a vanilla disc. It uses Fabric's custom audio stream hook and Minecraft's own Ogg decoder, and it
   seeks forward for late joiners.
 - The server never trusts the client's numbers. It checks the SHA-256, parses the Ogg file itself (it must be
   a single mono Vorbis stream) and measures the length from the file.
 
-## Things to check on the first build
+## Download
 
-This code was written in a sandbox that couldn't download Minecraft or the Fabric maven, so it **has not been
-compiled yet**. Most of the Minecraft 26.3 names (screens, menus, payloads, permissions, block entities) were
-checked against Fabric API's own 26.3 source. A few vanilla names couldn't be checked that way. If the build
-fails, these are the likely spots:
-
-- `JukeboxBlockEntity.tick(Level, BlockPos, BlockState, JukeboxBlockEntity)`, `getTheItem()`, `getSongPlayer()` and
-  `JukeboxSongPlayer.isPlaying() / getTicksSinceSongStarted() / stop(LevelAccessor, BlockState)`
-  (`JukeboxBlockEntityMixin`, `JukeboxTracker`)
-- `net.minecraft.client.sounds.JOrbisAudioStream(InputStream)` (`SeekingOggStream`)
-- `Screen.onFilesDrop(List<Path>)`, `KeyEvent.key()`, `EditBox.setHint/canConsumeInput`,
-  `Font.plainSubstrByWidth` (`DiscBurnerScreen`)
-- `Item.Properties.jukeboxPlayable(ResourceKey)` and `TooltipDisplay.withHidden(...)` (`ModRegistry`)
+Every push is built on GitHub Actions. Open the repository's **Actions** tab, pick the latest green **Build**
+run, and download the **custom-discs-mod** artifact. It is a zip with the mod jar inside. Put the jar in your
+`mods` folder together with Fabric API.
