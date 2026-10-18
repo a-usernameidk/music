@@ -25,7 +25,7 @@ public final class ModPayloads {
 	private ModPayloads() {
 	}
 
-	private static <T extends CustomPacketPayload> CustomPacketPayload.Type<T> type(String name) {
+	private static <T extends CustomPacketPayload> CustomPacketPayload.Type<T> typeOf(String name) {
 		return new CustomPacketPayload.Type<>(CustomDiscs.id(name));
 	}
 
@@ -48,7 +48,7 @@ public final class ModPayloads {
 
 	/** Starts an upload for the Disc Burner at {@code pos}. The file itself follows in {@link UploadChunk}s. */
 	public record UploadBegin(int uploadId, BlockPos pos, String title, String artist, String hash, int size) implements CustomPacketPayload {
-		public static final Type<UploadBegin> TYPE = type("upload_begin");
+		public static final Type<UploadBegin> TYPE = typeOf("upload_begin");
 		public static final StreamCodec<RegistryFriendlyByteBuf, UploadBegin> CODEC = StreamCodec.composite(
 				ByteBufCodecs.VAR_INT, UploadBegin::uploadId,
 				BlockPos.STREAM_CODEC, UploadBegin::pos,
@@ -66,7 +66,7 @@ public final class ModPayloads {
 	}
 
 	public record UploadChunk(int uploadId, int seq, byte[] data) implements CustomPacketPayload {
-		public static final Type<UploadChunk> TYPE = type("upload_chunk");
+		public static final Type<UploadChunk> TYPE = typeOf("upload_chunk");
 		public static final StreamCodec<RegistryFriendlyByteBuf, UploadChunk> CODEC = StreamCodec.composite(
 				ByteBufCodecs.VAR_INT, UploadChunk::uploadId,
 				ByteBufCodecs.VAR_INT, UploadChunk::seq,
@@ -81,7 +81,7 @@ public final class ModPayloads {
 	}
 
 	public record UploadCancel(int uploadId) implements CustomPacketPayload {
-		public static final Type<UploadCancel> TYPE = type("upload_cancel");
+		public static final Type<UploadCancel> TYPE = typeOf("upload_cancel");
 		public static final StreamCodec<RegistryFriendlyByteBuf, UploadCancel> CODEC = ByteBufCodecs.VAR_INT.map(UploadCancel::new, UploadCancel::uploadId).cast();
 
 		@Override
@@ -92,7 +92,7 @@ public final class ModPayloads {
 
 	/** Lazy download: asks the server for a track this client does not have cached yet. */
 	public record RequestTrack(String hash) implements CustomPacketPayload {
-		public static final Type<RequestTrack> TYPE = type("request_track");
+		public static final Type<RequestTrack> TYPE = typeOf("request_track");
 		public static final StreamCodec<RegistryFriendlyByteBuf, RequestTrack> CODEC = ByteBufCodecs.stringUtf8(HASH_LENGTH).map(RequestTrack::new, RequestTrack::hash).cast();
 
 		@Override
@@ -102,7 +102,7 @@ public final class ModPayloads {
 	}
 
 	public record TrackChunkAck(String hash, int seq) implements CustomPacketPayload {
-		public static final Type<TrackChunkAck> TYPE = type("track_chunk_ack");
+		public static final Type<TrackChunkAck> TYPE = typeOf("track_chunk_ack");
 		public static final StreamCodec<RegistryFriendlyByteBuf, TrackChunkAck> CODEC = StreamCodec.composite(
 				ByteBufCodecs.stringUtf8(HASH_LENGTH), TrackChunkAck::hash,
 				ByteBufCodecs.VAR_INT, TrackChunkAck::seq,
@@ -119,7 +119,7 @@ public final class ModPayloads {
 
 	/** Sent on join so the client can check limits before converting and uploading. */
 	public record ServerSettings(int maxDurationSeconds, int maxFileBytes, int maxBitrateKbps, boolean canBurn) implements CustomPacketPayload {
-		public static final Type<ServerSettings> TYPE = type("server_settings");
+		public static final Type<ServerSettings> TYPE = typeOf("server_settings");
 		public static final StreamCodec<RegistryFriendlyByteBuf, ServerSettings> CODEC = StreamCodec.composite(
 				ByteBufCodecs.VAR_INT, ServerSettings::maxDurationSeconds,
 				ByteBufCodecs.VAR_INT, ServerSettings::maxFileBytes,
@@ -144,7 +144,7 @@ public final class ModPayloads {
 		/** Upload rejected or failed; {@code message} says why. */
 		public static final int ERROR = 3;
 
-		public static final Type<UploadStatus> TYPE = type("upload_status");
+		public static final Type<UploadStatus> TYPE = typeOf("upload_status");
 		public static final StreamCodec<RegistryFriendlyByteBuf, UploadStatus> CODEC = StreamCodec.composite(
 				ByteBufCodecs.VAR_INT, UploadStatus::uploadId,
 				ByteBufCodecs.VAR_INT, UploadStatus::state,
@@ -160,7 +160,7 @@ public final class ModPayloads {
 	}
 
 	public record TrackChunk(String hash, int seq, int totalSize, byte[] data) implements CustomPacketPayload {
-		public static final Type<TrackChunk> TYPE = type("track_chunk");
+		public static final Type<TrackChunk> TYPE = typeOf("track_chunk");
 		public static final StreamCodec<RegistryFriendlyByteBuf, TrackChunk> CODEC = StreamCodec.composite(
 				ByteBufCodecs.stringUtf8(HASH_LENGTH), TrackChunk::hash,
 				ByteBufCodecs.VAR_INT, TrackChunk::seq,
@@ -176,7 +176,7 @@ public final class ModPayloads {
 	}
 
 	public record TrackUnavailable(String hash) implements CustomPacketPayload {
-		public static final Type<TrackUnavailable> TYPE = type("track_unavailable");
+		public static final Type<TrackUnavailable> TYPE = typeOf("track_unavailable");
 		public static final StreamCodec<RegistryFriendlyByteBuf, TrackUnavailable> CODEC = ByteBufCodecs.stringUtf8(HASH_LENGTH).map(TrackUnavailable::new, TrackUnavailable::hash).cast();
 
 		@Override
@@ -190,7 +190,7 @@ public final class ModPayloads {
 	 * Sent when it starts and to anyone who comes into range later, who then seeks to the right position.
 	 */
 	public record PlayCustomDisc(BlockPos pos, TrackInfo track, long startGameTime) implements CustomPacketPayload {
-		public static final Type<PlayCustomDisc> TYPE = type("play_custom_disc");
+		public static final Type<PlayCustomDisc> TYPE = typeOf("play_custom_disc");
 		public static final StreamCodec<RegistryFriendlyByteBuf, PlayCustomDisc> CODEC = StreamCodec.composite(
 				BlockPos.STREAM_CODEC, PlayCustomDisc::pos,
 				TrackInfo.STREAM_CODEC, PlayCustomDisc::track,
@@ -205,7 +205,7 @@ public final class ModPayloads {
 	}
 
 	public record StopCustomDisc(BlockPos pos) implements CustomPacketPayload {
-		public static final Type<StopCustomDisc> TYPE = type("stop_custom_disc");
+		public static final Type<StopCustomDisc> TYPE = typeOf("stop_custom_disc");
 		public static final StreamCodec<RegistryFriendlyByteBuf, StopCustomDisc> CODEC = BlockPos.STREAM_CODEC.map(StopCustomDisc::new, StopCustomDisc::pos).cast();
 
 		@Override
