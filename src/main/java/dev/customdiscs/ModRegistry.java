@@ -3,6 +3,7 @@ package dev.customdiscs;
 import java.util.function.Function;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.core.Registry;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.component.DataComponents;
@@ -12,7 +13,6 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CreativeModeTabs;
-import net.minecraft.world.item.EitherHolder;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -92,10 +92,10 @@ public final class ModRegistry {
 	 * Makes a disc playable in jukeboxes. This is set on each burned disc instead of on the item's default
 	 * properties: a default {@code jukeboxPlayable} makes the client look up {@link #BURNED_SONG} while joining
 	 * any server, and servers without this mod don't have that song, so the client crashed on login.
-	 * An {@link EitherHolder} made from a key is only resolved when the disc goes into a jukebox.
+	 * Discs are only burned on a server that has the mod, so the song is looked up there.
 	 */
-	public static void makePlayable(ItemStack stack) {
-		stack.set(DataComponents.JUKEBOX_PLAYABLE, new JukeboxPlayable(new EitherHolder<>(BURNED_SONG)));
+	public static void makePlayable(ItemStack stack, HolderLookup.Provider registries) {
+		stack.set(DataComponents.JUKEBOX_PLAYABLE, new JukeboxPlayable(registries.lookupOrThrow(Registries.JUKEBOX_SONG).getOrThrow(BURNED_SONG)));
 	}
 
 	public static void register() {
