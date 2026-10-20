@@ -37,6 +37,8 @@ jobs:
           net.minecraft.client.resources.sounds.AbstractSoundInstance
           net.minecraft.world.level.block.entity.JukeboxBlockEntity
           net.minecraft.world.item.JukeboxSongPlayer
+          net.minecraft.world.item.JukeboxPlayable
+          net.minecraft.world.item.EitherHolder
           net.minecraft.world.item.component.TooltipDisplay
           'net.minecraft.world.item.Item$Properties'
           > api-dump.txt; cat api-dump.txt

@@ -12,8 +12,11 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CreativeModeTabs;
+import net.minecraft.world.item.EitherHolder;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.JukeboxPlayable;
 import net.minecraft.world.item.JukeboxSong;
 import net.minecraft.world.item.Rarity;
 import net.minecraft.world.item.component.TooltipDisplay;
@@ -62,7 +65,6 @@ public final class ModRegistry {
 	public static final Item CUSTOM_MUSIC_DISC = item("custom_music_disc", CustomMusicDiscItem::new, new Item.Properties()
 			.stacksTo(1)
 			.rarity(Rarity.RARE)
-			.jukeboxPlayable(BURNED_SONG)
 			// Hide the vanilla "song description" line; DiscInfo adds "Artist - Title" instead.
 			.component(DataComponents.TOOLTIP_DISPLAY, TooltipDisplay.DEFAULT.withHidden(DataComponents.JUKEBOX_PLAYABLE, true)));
 
@@ -84,6 +86,16 @@ public final class ModRegistry {
 	private static Item item(String name, Function<Item.Properties, Item> factory, Item.Properties properties) {
 		ResourceKey<Item> key = ResourceKey.create(Registries.ITEM, CustomDiscs.id(name));
 		return Registry.register(BuiltInRegistries.ITEM, key, factory.apply(properties.setId(key)));
+	}
+
+	/**
+	 * Makes a disc playable in jukeboxes. This is set on each burned disc instead of on the item's default
+	 * properties: a default {@code jukeboxPlayable} makes the client look up {@link #BURNED_SONG} while joining
+	 * any server, and servers without this mod don't have that song, so the client crashed on login.
+	 * An {@link EitherHolder} made from a key is only resolved when the disc goes into a jukebox.
+	 */
+	public static void makePlayable(ItemStack stack) {
+		stack.set(DataComponents.JUKEBOX_PLAYABLE, new JukeboxPlayable(new EitherHolder<>(BURNED_SONG)));
 	}
 
 	public static void register() {

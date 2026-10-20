@@ -313,6 +313,7 @@ public final class UploadManager {
 		DiscInfo disc = new DiscInfo(title, cleanText(request.artist()), request.explicit(), request.shuffle(), tracks);
 		ItemStack item = new ItemStack(ModRegistry.CUSTOM_MUSIC_DISC);
 		item.set(ModRegistry.DISC, disc);
+		ModRegistry.makePlayable(item);
 
 		Container container = menu.getContainer();
 		container.removeItem(DiscBurnerBlockEntity.SLOT_INPUT, 1);
